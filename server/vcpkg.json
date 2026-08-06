@@ -1,0 +1,13 @@
+{
+  "name": "spiderchat-server",
+  "version": "0.1.0",
+  "dependencies": [
+    "fmt",
+    "boost-beast",
+    "boost-asio",
+    "boost-system",
+    "boost-thread",
+    "nlohmann-json",
+    "protobuf"
+  ]
+}

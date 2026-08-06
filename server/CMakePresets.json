@@ -1,0 +1,11 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "macos-vcpkg",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "toolchainFile": "/Users/gradenkova/cpp/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    }
+  ]
+}

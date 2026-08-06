@@ -1,0 +1,59 @@
+# Ignore build directories
+/build/
+/build-*/
+/cmake-build-*/
+/server/build/
+
+# CMake artifacts
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# vcpkg artifacts
+vcpkg_installed/
+/server/build/vcpkg_installed/
+
+# IDE/editor files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Temporary files and editor swap
+*~
+*.swp
+*.swo
+
+# Object files, binaries, shared libs
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Coverage and build reports
+coverage/
+*.gcda
+*.gcno
+
+# Generated protobufs (if generated at build time)
+# Uncomment if you generate .pb.cc/.pb.h during build
+# *.pb.h
+# *.pb.cc

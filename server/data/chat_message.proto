@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package chat;
+
+// Chat message used for client-server communication
+message ChatMessage {
+  string userName = 1;
+  string message = 2;
+  string IP = 3;
+}
