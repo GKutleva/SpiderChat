@@ -1,68 +1,87 @@
 #include "ws/server.hpp"
 #include "ws/session.hpp"
-#include <fmt/core.h>
-#include <boost/beast/websocket.hpp>
-#include <boost/beast/core.hpp>
-#include <nlohmann/json.hpp>
-#include <boost/asio.hpp>
 
-namespace asio = boost::asio;
-namespace beast = boost::beast;
-using tcp = asio::ip::tcp;
-using json = nlohmann::json;
+#include <boost/asio/strand.hpp>
+#include <fmt/core.h>
+#include "chat/chat_room.hpp"
 
 namespace ws {
 
-server::server(asio::io_context& ioc, tcp::endpoint endpoint, int max_sessions)
-    : ioc_(ioc), acceptor_(ioc, endpoint), active_sessions_(0), max_sessions_(max_sessions)
+server::server(
+    asio::io_context& ioc,
+    tcp::endpoint endpoint,
+    int max_sessions)
+    : ioc_(ioc),
+      acceptor_(ioc, endpoint),
+      chat_room_(std::make_shared<chat::chat_room>()),
+      max_sessions_(max_sessions)
 {
-    acceptor_.set_option(asio::socket_base::reuse_address(true));
 }
 
 void server::run()
 {
-    fmt::print("ws::server starting on {}:{}\n", acceptor_.local_endpoint().address().to_string(), acceptor_.local_endpoint().port());
+    const auto endpoint = acceptor_.local_endpoint();
+
+    fmt::print(
+        "Server started on {}:{}\n",
+        endpoint.address().to_string(),
+        endpoint.port());
+
     do_accept();
 }
 
 void server::do_accept()
 {
-    acceptor_.async_accept([this](boost::beast::error_code ec, tcp::socket socket) {
-        if (ec) {
-            fmt::print("Accept failed: {}\n", ec.message());
-        } else {
-            int current = active_sessions_.load();
-            if (current >= max_sessions_) {
-                // Send a short-lived busy response (text)
-                try {
-                    auto busy_ws = std::make_shared<boost::beast::websocket::stream<tcp::socket>>(std::move(socket));
-                    busy_ws->async_accept([busy_ws](boost::beast::error_code ec) {
-                        if (!ec) {
-                            nlohmann::json reply;
-                            reply["status"] = "error";
-                            reply["message"] = "server overloaded";
-                            std::string out = reply.dump();
-                            busy_ws->text(true);
-                            busy_ws->async_write(asio::buffer(out), [busy_ws](boost::beast::error_code, std::size_t) {
-                                boost::beast::error_code e2;
-                                busy_ws->next_layer().shutdown(tcp::socket::shutdown_both, e2);
-                                busy_ws->next_layer().close(e2);
-                            });
-                        }
-                    });
-                } catch (const std::exception& ex) {
-                    fmt::print("Error sending busy response: {}\n", ex.what());
-                }
-            } else {
-                active_sessions_.fetch_add(1);
-                auto s = std::make_shared<session>(std::move(socket), active_sessions_);
-                s->run();
+    acceptor_.async_accept(
+        asio::make_strand(ioc_),
+        [this](beast::error_code ec, tcp::socket socket)
+        {
+            if (ec) {
+                fmt::print(
+                    "Accept error: {}\n",
+                    ec.message());
             }
-        }
+            else if (active_sessions_.load() >= max_sessions_) {
+                reject_connection(socket);
+            }
+            else {
+                start_session(std::move(socket));
+            }
 
-        // continue accepting
-        do_accept();
-    });
+            do_accept();
+        });
+}
+
+void server::start_session(tcp::socket socket)
+{
+    active_sessions_.fetch_add(1);
+
+    fmt::print(
+        "New client connected. Active sessions: {}\n",
+        active_sessions_.load());
+
+    auto new_session = std::make_shared<session>(
+        std::move(socket),
+        active_sessions_,
+        chat_room_);
+
+    new_session->run();
+}
+
+void server::reject_connection(tcp::socket& socket)
+{
+    fmt::print(
+        "Connection rejected. Server limit is {} clients.\n",
+        max_sessions_);
+
+    beast::error_code ec;
+    socket.close(ec);
+
+    if (ec) {
+        fmt::print(
+            "Error closing connection: {}\n",
+            ec.message());
+    }
 }
 
 } // namespace ws

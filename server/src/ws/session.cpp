@@ -1,167 +1,241 @@
 #include "ws/session.hpp"
+
 #include "chat_message.pb.h"
 #include "data/chat_message_validation.hpp"
-#include <google/protobuf/util/json_util.h>
+
 #include <fmt/core.h>
+#include <google/protobuf/util/json_util.h>
+#include <nlohmann/json.hpp>
+#include "chat/chat_room.hpp"
+#include <boost/asio/post.hpp>
 
-namespace ws {
 
-session::session(tcp::socket socket, std::atomic<int>& active_sessions)
-    : ws_(std::move(socket)), active_sessions_(active_sessions)
+#include <utility>
+
+namespace ws 
+{
+
+using json = nlohmann::json;
+
+session::session(
+    tcp::socket socket,
+    std::atomic<int>& active_sessions,
+    std::shared_ptr<chat::chat_room> chat_room)
+    : websocket_(std::move(socket)),
+      strand_(websocket_.get_executor()),
+      active_sessions_(active_sessions),
+      chat_room_(std::move(chat_room))
 {
 }
-
-session::~session() = default;
 
 void session::run()
 {
     auto self = shared_from_this();
-    ws_.async_accept([self](beast::error_code ec) {
-        if (ec) {
-            fmt::print("Accept error: {}\n", ec.message());
-            self->close_and_count_down();
-            return;
-        }
-        self->do_read();
-    });
-}
 
-void session::do_read()
-{
-    auto self = shared_from_this();
-    ws_.async_read(buffer_, [self](beast::error_code ec, std::size_t bytes_transferred) {
-        boost::ignore_unused(bytes_transferred);
-        if (ec == websocket::error::closed) {
-            self->close_and_count_down();
-            return;
-        }
-        if (ec) {
-            fmt::print("Read error: {}\n", ec.message());
-            self->close_and_count_down();
-            return;
-        }
+    websocket_.async_accept(
+        [self](beast::error_code error)
+        {
+            if (error) {
+                fmt::print(
+                    "WebSocket handshake failed: {}\n",
+                    error.message());
 
-        std::string msg = beast::buffers_to_string(self->buffer_.data());
-        self->buffer_.consume(self->buffer_.size());
-
-        try {
-            bool was_text = self->ws_.got_text();
-            chat::ChatMessage proto;
-
-            if (was_text) {
-                auto status = google::protobuf::util::JsonStringToMessage(msg, &proto);
-                if (!status.ok()) {
-                    fmt::print("Protobuf JSON parse error: {}\n", status.ToString());
-                    json reply;
-                    reply["status"] = "error";
-                    reply["message"] = "invalid json/protobuf";
-                    std::string out = reply.dump();
-                    self->ws_.text(true);
-                    self->ws_.async_write(asio::buffer(out), [self](beast::error_code ec, std::size_t) {
-                        if (ec) {
-                            fmt::print("Write error: {}\n", ec.message());
-                            self->close_and_count_down();
-                            return;
-                        }
-                        self->do_read();
-                    });
-                    return;
-                }
-            } else {
-                if (!proto.ParseFromString(msg)) {
-                    fmt::print("Failed to parse protobuf binary frame\n");
-                    json reply;
-                    reply["status"] = "error";
-                    reply["message"] = "invalid protobuf";
-                    std::string out = reply.dump();
-                    self->ws_.text(true);
-                    self->ws_.async_write(asio::buffer(out), [self](beast::error_code ec, std::size_t) {
-                        if (ec) {
-                            fmt::print("Write error: {}\n", ec.message());
-                            self->close_and_count_down();
-                            return;
-                        }
-                        self->do_read();
-                    });
-                    return;
-                }
-            }
-
-            // Validate required fields
-            std::string v_err = validateChatMessage(proto);
-            if (!v_err.empty()) {
-                fmt::print("Validation failed: {}\n", v_err);
-                json reply;
-                reply["status"] = "error";
-                reply["message"] = v_err;
-                std::string out = reply.dump();
-                self->ws_.text(true);
-                self->ws_.async_write(asio::buffer(out), [self](beast::error_code ec, std::size_t) {
-                    if (ec) {
-                        fmt::print("Write error: {}\n", ec.message());
-                        self->close_and_count_down();
-                        return;
-                    }
-                    self->do_read();
-                });
+                self->close();
                 return;
             }
 
-            fmt::print("Session received: {} / {} / {}\n", proto.username(), proto.ip(), proto.message());
+            fmt::print("WebSocket connection established\n");
 
-            // Reply in same format as received
-            if (was_text) {
-                std::string out_json;
-                auto s2 = google::protobuf::util::MessageToJsonString(proto, &out_json);
-                if (!s2.ok()) {
-                    fmt::print("Failed to convert proto to JSON: {}\n", s2.ToString());
-                    self->do_read();
-                    return;
-                }
-                self->ws_.text(true);
-                self->ws_.async_write(asio::buffer(out_json), [self](beast::error_code ec, std::size_t) {
-                    if (ec) {
-                        fmt::print("Write error (json reply): {}\n", ec.message());
-                        self->close_and_count_down();
-                        return;
-                    }
-                    self->do_read();
-                });
-            } else {
-                std::string proto_bytes;
-                if (!proto.SerializeToString(&proto_bytes)) {
-                    fmt::print("Failed to serialize proto message\n");
-                    self->do_read();
-                    return;
-                }
-                self->ws_.binary(true);
-                self->ws_.async_write(asio::buffer(proto_bytes), [self](beast::error_code ec, std::size_t) {
-                    if (ec) {
-                        fmt::print("Write error (proto reply): {}\n", ec.message());
-                        self->close_and_count_down();
-                        return;
-                    }
-                    self->do_read();
-                });
-            }
-
-        } catch (const std::exception& ex) {
-            fmt::print("Session exception: {}\n", ex.what());
-            self->close_and_count_down();
-            return;
-        }
-    });
+            self->chat_room_->join(self);
+            self->read_message();
+        });
 }
 
-void session::close_and_count_down()
+void session::read_message()
 {
-    int prev = active_sessions_.fetch_sub(1);
-    if (prev <= 0) {
-        active_sessions_.store(0);
+    auto self = shared_from_this();
+
+    websocket_.async_read(
+        read_buffer_,
+        [self](
+            beast::error_code error,
+            std::size_t bytes_transferred)
+        {
+            boost::ignore_unused(bytes_transferred);
+
+            if (error == websocket::error::closed) {
+                self->close();
+                return;
+            }
+
+            if (error) {
+                fmt::print(
+                    "WebSocket read failed: {}\n",
+                    error.message());
+
+                self->close();
+                return;
+            }
+
+            if (!self->websocket_.got_text()) {
+                self->read_buffer_.consume(
+                    self->read_buffer_.size());
+
+                self->send_error(
+                    "Only text messages are supported");
+
+                return;
+            }
+
+            std::string data =
+                beast::buffers_to_string(
+                    self->read_buffer_.data());
+
+            self->read_buffer_.consume(
+                self->read_buffer_.size());
+
+            self->process_message(data);
+        });
+}
+
+void session::process_message(const std::string& data)
+{
+    chat::ChatMessage message;
+
+    const auto parse_result =
+        google::protobuf::util::JsonStringToMessage(
+            data,
+            &message);
+
+    if (!parse_result.ok()) {
+        fmt::print(
+            "Invalid message: {}\n",
+            parse_result.ToString());
+
+        send_error("Invalid message format");
+        return;
     }
-    beast::error_code ec;
-    ws_.next_layer().shutdown(tcp::socket::shutdown_both, ec);
-    ws_.next_layer().close(ec);
+
+    const std::string validation_error =
+        validateChatMessage(message);
+
+    if (!validation_error.empty()) {
+        fmt::print(
+            "Message validation failed: {}\n",
+            validation_error);
+
+        send_error(validation_error);
+        return;
+    }
+
+    fmt::print(
+        "{}: {}\n",
+        message.username(),
+        message.message());
+
+    std::string response;
+
+    const auto serialization_result =
+        google::protobuf::util::MessageToJsonString(
+            message,
+            &response);
+
+    if (!serialization_result.ok()) {
+        fmt::print(
+            "Message serialization failed: {}\n",
+            serialization_result.ToString());
+
+        send_error("Could not create response");
+        return;
+    }
+
+    chat_room_->broadcast(response);
+    read_message();
+}
+
+void session::send_message(std::string message)
+{
+    auto self = shared_from_this();
+
+    asio::post(
+        strand_,
+        [self, message = std::move(message)]() mutable
+        {
+            const bool write_in_progress =
+                !self->write_queue_.empty();
+
+            self->write_queue_.push_back(
+                std::move(message));
+
+            if (!write_in_progress) {
+                self->write_next_message();
+            }
+        });
+}
+
+void session::write_next_message()
+{
+    auto self = shared_from_this();
+
+    websocket_.text(true);
+
+    websocket_.async_write(
+        asio::buffer(write_queue_.front()),
+        [self](
+            beast::error_code error,
+            std::size_t bytes_transferred)
+        {
+            boost::ignore_unused(bytes_transferred);
+
+            if (error) {
+                fmt::print(
+                    "WebSocket write failed: {}\n",
+                    error.message());
+
+                self->close();
+                return;
+            }
+
+            self->write_queue_.pop_front();
+
+            if (!self->write_queue_.empty()) {
+                self->write_next_message();
+            }
+        });
+}
+
+void session::send_error(
+    const std::string& error_message)
+{
+    json response;
+
+    response["status"] = "error";
+    response["message"] = error_message;
+
+    send_message(response.dump());
+}
+
+void session::close()
+{
+    if (closed_.exchange(true)) {
+        return;
+    }
+
+    chat_room_->leave(this);
+    active_sessions_.fetch_sub(1);
+
+    beast::error_code error;
+
+    websocket_.next_layer().shutdown(
+        tcp::socket::shutdown_both,
+        error);
+
+    error.clear();
+    websocket_.next_layer().close(error);
+
+    fmt::print(
+        "Session closed. Active sessions: {}\n",
+        active_sessions_.load());
 }
 
 } // namespace ws

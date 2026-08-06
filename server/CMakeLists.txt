@@ -21,7 +21,12 @@ target_link_libraries(proto_files PRIVATE protobuf::libprotobuf)
 # Ensure generated headers are visible to consumers
 target_include_directories(proto_files PUBLIC ${CMAKE_BINARY_DIR})
 
-add_executable(spiderchat-server src/main.cpp src/ws/server.cpp src/ws/session.cpp)
+add_executable(spiderchat-server
+    src/main.cpp
+    src/ws/server.cpp
+    src/ws/session.cpp
+    src/chat/chat_room.cpp
+)
 
 target_link_libraries(spiderchat-server PRIVATE
     fmt::fmt

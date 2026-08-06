@@ -1,26 +1,53 @@
 #pragma once
 
-#include <boost/asio.hpp>
-#include <memory>
 #include <atomic>
 
-namespace asio = boost::asio;
-using tcp = asio::ip::tcp;
+#include <boost/asio.hpp>
+#include <boost/beast/core.hpp>
+#include <memory>
+#include <deque>
 
-namespace ws {
+namespace chat 
+{
+    class chat_room;
+}
 
-class server {
-public:
-    server(asio::io_context& ioc, tcp::endpoint endpoint, int max_sessions = 10);
-    void run();
+namespace ws 
+{
+    namespace asio      = boost::asio;
+    namespace beast     = boost::beast;
+    namespace websocket = beast::websocket;
 
-private:
-    asio::io_context& ioc_;
-    tcp::acceptor acceptor_;
-    std::atomic<int> active_sessions_;
-    int max_sessions_;
+    using tcp = asio::ip::tcp;
 
-    void do_accept();
-};
+    namespace asio  = boost::asio;
+    namespace beast = boost::beast;
+
+    using tcp = asio::ip::tcp;
+
+    class server
+    {
+    public:
+        server(
+            asio::io_context& ioc,
+            tcp::endpoint endpoint,
+            int max_sessions);
+
+        void run();
+
+    private:
+        void do_accept();
+        void start_session(tcp::socket socket);
+        void reject_connection(tcp::socket& socket);
+
+    private:
+        asio::io_context& ioc_;
+        tcp::acceptor acceptor_;
+
+        std::shared_ptr<chat::chat_room> chat_room_;
+
+        std::atomic<int> active_sessions_{0};
+        int max_sessions_;
+    };
 
 } // namespace ws
