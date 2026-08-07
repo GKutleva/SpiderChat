@@ -1,25 +1,19 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
+#include <string>
 
 #include <boost/asio.hpp>
 #include <boost/beast/core.hpp>
-#include <memory>
-#include <deque>
 
-namespace chat 
+namespace chat
 {
     class chat_room;
 }
 
-namespace ws 
+namespace ws
 {
-    namespace asio      = boost::asio;
-    namespace beast     = boost::beast;
-    namespace websocket = beast::websocket;
-
-    using tcp = asio::ip::tcp;
-
     namespace asio  = boost::asio;
     namespace beast = boost::beast;
 
@@ -39,6 +33,9 @@ namespace ws
         void do_accept();
         void start_session(tcp::socket socket);
         void reject_connection(tcp::socket& socket);
+
+        void read_console();
+        void process_command(const std::string& command);
 
     private:
         asio::io_context& ioc_;

@@ -1,9 +1,12 @@
 #include "ws/server.hpp"
 #include "ws/session.hpp"
+#include "chat/chat_room.hpp"
 
 #include <boost/asio/strand.hpp>
 #include <fmt/core.h>
-#include "chat/chat_room.hpp"
+
+#include <iostream>
+#include <thread>
 
 namespace ws {
 
@@ -28,6 +31,62 @@ void server::run()
         endpoint.port());
 
     do_accept();
+
+    std::thread([this]()
+    {
+        read_console();
+    }).detach();
+}
+
+void server::read_console()
+{
+    std::string command;
+
+    while (std::getline(std::cin, command))
+    {
+        process_command(command);
+    }
+}
+
+void server::process_command(const std::string& command)
+{
+    if (command == "clients")
+    {
+        chat_room_->list_clients();
+    }
+    else if (command == "help")
+    {
+        fmt::print("Available commands:\n");
+        fmt::print("  clients         - show connected clients\n");
+        fmt::print("  kick <username> - disconnect client\n");
+        fmt::print("  help            - show commands\n");
+    }
+    else if (command.rfind("kick ", 0) == 0)
+    {
+        const std::string username = command.substr(5);
+
+        if (username.empty()) {
+            fmt::print("Usage: kick <username>\n");
+            return;
+        }
+
+        if (chat_room_->kick(username)) {
+            fmt::print(
+                "Client '{}' disconnected.\n",
+                username);
+        }
+        else {
+            fmt::print(
+                "Client '{}' not found.\n",
+                username);
+        }
+    }
+    else if (!command.empty())
+    {
+        fmt::print(
+            "Unknown command: '{}'. Type 'help'.\n",
+            command);
+    }
 }
 
 void server::do_accept()

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <thread>
 #include <vector>
+#include <iostream>
 
 namespace   asio    = boost::asio;
 using       tcp     = asio::ip::tcp;
