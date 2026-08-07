@@ -14,6 +14,11 @@ namespace chat
     class chat_room;
 }
 
+namespace logging
+{
+    class chat_logger;
+}
+
 namespace ws 
 {
     namespace asio      = boost::asio;
@@ -28,7 +33,8 @@ namespace ws
     session(
         tcp::socket socket,
         std::atomic<int>& active_sessions,
-        std::shared_ptr<chat::chat_room> chat_room);
+        std::shared_ptr<chat::chat_room> chat_room,
+        std::shared_ptr<logging::chat_logger> logger);
 
     void run();
     void send_message(std::string message);
@@ -67,6 +73,7 @@ namespace ws
         std::chrono::steady_clock::time_point connected_at_;
 
         asio::steady_timer inactivity_timer_;
+        std::shared_ptr<logging::chat_logger> logger_;
     };
 
 } // namespace ws

@@ -12,6 +12,11 @@ namespace chat
     class chat_room;
 }
 
+namespace logging
+{
+    class chat_logger;
+}
+
 namespace ws
 {
     namespace asio  = boost::asio;
@@ -45,6 +50,8 @@ namespace ws
 
         std::atomic<int> active_sessions_{0};
         int max_sessions_;
+
+        std::shared_ptr<logging::chat_logger> logger_;
     };
 
 } // namespace ws

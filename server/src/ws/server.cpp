@@ -1,6 +1,7 @@
 #include "ws/server.hpp"
 #include "ws/session.hpp"
 #include "chat/chat_room.hpp"
+#include "logging/chat_logger.hpp"
 
 #include <boost/asio/strand.hpp>
 #include <fmt/core.h>
@@ -17,6 +18,7 @@ server::server(
     : ioc_(ioc),
       acceptor_(ioc, endpoint),
       chat_room_(std::make_shared<chat::chat_room>()),
+      logger_(std::make_shared<logging::chat_logger>()),
       max_sessions_(max_sessions)
 {
 }
@@ -120,9 +122,10 @@ void server::start_session(tcp::socket socket)
         active_sessions_.load());
 
     auto new_session = std::make_shared<session>(
-        std::move(socket),
-        active_sessions_,
-        chat_room_);
+    std::move(socket),
+    active_sessions_,
+    chat_room_,
+    logger_);
 
     new_session->run();
 }

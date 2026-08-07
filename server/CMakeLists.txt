@@ -26,6 +26,7 @@ add_executable(spiderchat-server
     src/ws/server.cpp
     src/ws/session.cpp
     src/chat/chat_room.cpp
+    src/logging/chat_logger.cpp
 )
 
 target_link_libraries(spiderchat-server PRIVATE
