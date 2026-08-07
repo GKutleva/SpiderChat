@@ -320,7 +320,7 @@ void session::close()
 void session::reset_inactivity_timer()
 {
     inactivity_timer_.expires_after(
-        std::chrono::minutes(1));
+        std::chrono::minutes(10));
 
     auto self = shared_from_this();
 
